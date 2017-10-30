@@ -6,28 +6,25 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.BitSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.RandomUtils;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-
+import static com.google.common.base.Preconditions.*;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntArrays;
 import it.unimi.dsi.fastutil.ints.IntComparator;
 import it.unimi.dsi.fastutil.ints.IntIterable;
 import it.unimi.dsi.fastutil.ints.IntIterator;
+import org.apache.commons.lang3.StringUtils;
 import tech.tablesaw.columns.Column;
 import tech.tablesaw.filtering.Filter;
 import tech.tablesaw.io.DataFrameReader;
 import tech.tablesaw.io.DataFrameWriter;
+import tech.tablesaw.io.TypeUtils;
 import tech.tablesaw.io.csv.CsvReader;
 import tech.tablesaw.io.csv.CsvWriter;
 import tech.tablesaw.io.html.HtmlTableWriter;
@@ -46,10 +43,7 @@ import tech.tablesaw.sorting.Sort;
 import tech.tablesaw.sorting.Sort.Order;
 import tech.tablesaw.store.StorageManager;
 import tech.tablesaw.store.TableMetadata;
-import tech.tablesaw.table.Projection;
-import tech.tablesaw.table.Relation;
-import tech.tablesaw.table.Rows;
-import tech.tablesaw.table.ViewGroup;
+import tech.tablesaw.table.*;
 import tech.tablesaw.util.BitmapBackedSelection;
 import tech.tablesaw.util.IntComparatorChain;
 import tech.tablesaw.util.ReversingIntComparator;
@@ -1165,4 +1159,158 @@ public class Table extends Relation implements IntIterable {
             }
         };
     }
+
+    public static Table construct(String data){
+        return construct("table", data);
+    }
+
+    public static Table construct(String name, String data){
+        if (StringUtils.isBlank(name) || StringUtils.isBlank(data)) {
+            throw new RuntimeException("error name or data");
+        }
+        Table table = Table.create(name);
+        String[] rows = data.split("\n");
+        for (int i = 0; i < rows.length; i++) {
+            String row = rows[i];
+            String[] cols = row.split("\\|");
+            if (i == 0) {
+                for (String col : cols) {
+                    ColumnType columnType = null;
+                    if (col.indexOf("@") >= 0) {
+                        String columnName = col.substring(col.indexOf("@") + 1).trim();
+                        columnType = ColumnType.getByType(columnName);
+                    }
+                    columnType = columnType == null ? ColumnType.CATEGORY : columnType;
+                    table.addColumn(TypeUtils.newColumn(col, columnType));
+                }
+            } else {
+                for (int j = 0; j < cols.length; j++) {
+                    Column column = table.column(j);
+                    String value = cols[j].trim();
+                    value = "null".equalsIgnoreCase(value) ? null : value;
+                    column.appendCell(value);
+                }
+            }
+        }
+        return table;
+    }
+
+    public Table innerJoin(Table right, Column leftColumn, Column rightColumn){
+        return join(right, leftColumn, rightColumn, JoinType.INNER);
+    }
+
+    public Table innerJoin(Table right, String leftColumn, String rightColumn){
+        checkNotNull(right, "右表不得为null");
+        return join(right, this.column(leftColumn), right.column(rightColumn), JoinType.INNER);
+    }
+
+    public Table outerJoin(Table right, Column leftColumn, Column rightColumn){
+        return join(right, leftColumn, rightColumn, JoinType.OUTER);
+    }
+
+    public Table outerJoin(Table right, String leftColumn, String rightColumn){
+        checkNotNull(right, "右表不得为null");
+        return join(right, this.column(leftColumn), right.column(rightColumn), JoinType.OUTER);
+    }
+
+    public Table leftJoin(Table right, Column leftColumn, Column rightColumn){
+        return join(right, leftColumn, rightColumn, JoinType.LEFT);
+    }
+
+    public Table leftJoin(Table right, String leftColumn, String rightColumn){
+        checkNotNull(right, "右表不得为null");
+        return join(right, this.column(leftColumn), right.column(rightColumn), JoinType.LEFT);
+    }
+
+    private Table join(Table right, Column leftColumn, Column rightColumn, JoinType joinType){
+        checkNotNull(right, "右表不得为null");
+        checkNotNull(leftColumn, "左列不得为null");
+        checkNotNull(rightColumn, "右列不得为null");
+        Table left = this;
+
+        Map<String, List<Integer>> rightMap = rightColumnMap(rightColumn);
+        Table result = mergeTable(left, right);
+
+        // 右列的标记数组，标记哪些行匹配到结果，哪些没有
+        byte[] mark = new byte[right.rowCount()];
+        for (int row = 0; row < leftColumn.size(); row++) {
+            String v = leftColumn.getString(row);
+            if (v == null) {
+                v = leftColumn.type().getMissingValue().toString();
+            }
+            List<Integer> rows = rightMap.get(v);
+            if (rows == null) {
+                if (joinType == JoinType.LEFT || joinType == JoinType.OUTER) {
+                    for (int col = 0; col < left.columnCount(); col++) {
+                        result.column(col).appendCell(left.column(col).getString(row));
+                    }
+                    for (int col = 0; col < right.columnCount(); col++) {
+                        result.column(left.columnCount() + col).appendCell(null);
+                    }
+                }
+            } else {
+                for (Integer r : rows) {
+                    // 将右列中匹配到的行标记为1
+                    mark[r] = 1;
+                    for (int col = 0; col < left.columnCount(); col++) {
+                        result.column(col).appendCell(left.column(col).getString(row));
+                    }
+                    for (int col = 0; col < right.columnCount(); col++) {
+                        result.column(left.columnCount() + col).appendCell(right.column(col).getString(r));
+                    }
+                }
+            }
+        }
+
+        // 如果是外连接，需要将右列中未匹配的行也输出到结果集
+        if (joinType == JoinType.OUTER) {
+            for (int row = 0; row < mark.length; row++) {
+                byte b = mark[row];
+                if (b == 1) {
+                    continue;
+                }
+                for (int col = 0; col < left.columnCount(); col++) {
+                    result.column(col).appendCell(null);
+                }
+                for (int col = 0; col < right.columnCount(); col++) {
+                    result.column(left.columnCount() + col).appendCell(right.column(col).getString(row));
+                }
+            }
+        }
+        return result;
+    }
+
+    private Map<String, List<Integer>> rightColumnMap(Column rightColumn){
+        Map<String, List<Integer>> rightMap = new HashMap<>(rightColumn.size());
+        for (int i = 0; i < rightColumn.size(); i++) {
+            String v = rightColumn.getString(i);
+            v = v == null ? "null" : v;
+            List<Integer> rows = rightMap.get(v);
+            if (rows == null) {
+                rows = new ArrayList<>();
+                rightMap.put(v, rows);
+            }
+            rows.add(i);
+        }
+        return rightMap;
+    }
+
+    /**
+     * 合并结果集
+     */
+    private Table mergeTable(Table left, Table right){
+        Table result = Table.create("result");
+        for (Column column : left.columns()) {
+            Column copy = column.emptyCopy();
+            copy.setName(left.name + copy.name());
+            result.addColumn(copy);
+        }
+        for (Column column : right.columns()) {
+            Column copy = column.emptyCopy();
+            copy.setName(right.name + copy.name());
+            result.addColumn(copy);
+        }
+        return result;
+    }
+
 }

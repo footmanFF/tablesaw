@@ -29,4 +29,14 @@ public enum ColumnType {
     public Comparable<?> getMissingValue() {
         return missingValue;
     }
+
+    public static ColumnType getByType(String type) {
+        for (ColumnType columnType : values()) {
+            if (columnType.name().equalsIgnoreCase(type)) {
+                return columnType;
+            }
+        }
+        return null;
+    }
+    
 }
