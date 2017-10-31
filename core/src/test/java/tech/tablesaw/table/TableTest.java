@@ -16,7 +16,7 @@ public class TableTest {
                 "a           | 1 \n" +
                 "b           | 2 \n" +
                 "null        | 3 \n";
-        
+
         Table table = Table.construct(data);
         assertEquals(table.rowCount(), 3);
         assertEquals(table.columnCount(), 2);
@@ -40,7 +40,7 @@ public class TableTest {
                 "a           | 1 \n" +
                 "b           | 2 \n" +
                 "c           | 3 \n";
-        
+
         Table left = Table.construct("left", leftData);
         Table right = Table.construct("right", rightData);
         Table result = left.innerJoin(right, "c1@category", "c1@category");
@@ -59,7 +59,7 @@ public class TableTest {
                 "a           | 1 \n" +
                 "b           | 2 \n" +
                 "c           | 3 \n";
-        
+
         String rightData = "c1@category | c2@category";
         Table left = Table.construct("left", leftData);
         Table right = Table.construct("right", rightData);
@@ -84,7 +84,7 @@ public class TableTest {
                 "a           | 1 \n" +
                 "b           | 2 \n" +
                 "c           | 3 \n";
-        
+
         Table left = Table.construct("left", leftData);
         Table right = Table.construct("right", rightData);
 
@@ -104,11 +104,28 @@ public class TableTest {
                 "null           | 3 \n";
         String rightData = "c1@category | c2@category \n" +
                 "null           | 1 \n";
-        
+
         Table left = Table.construct("left", leftData);
         Table right = Table.construct("right", rightData);
 
         Table result = left.innerJoin(right, "c1@category", "c1@category");
         assertEquals(result.rowCount(), 1);
     }
+
+    @Test
+    public void dropDuplicatesTest() throws Exception {
+        String leftData = "c1@category | c2@category \n" +
+                "a           | 1 \n" +
+                "a           | 2 \n" +
+                "c           | 3 \n" +
+                "c           | 3 \n" +
+                "c           | 3 \n";
+        Table table = Table.construct("table", leftData);
+        Table t1 = table.dropDuplicates("c1@category");
+        assertEquals(t1.rowCount(), 2);
+        
+        Table t2 = table.dropDuplicates("c2@category");
+        assertEquals(t2.rowCount(), 3);
+    }
+
 }

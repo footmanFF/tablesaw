@@ -14,6 +14,8 @@ import org.apache.commons.lang3.RandomUtils;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import static com.google.common.base.Preconditions.*;
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntArrays;
 import it.unimi.dsi.fastutil.ints.IntComparator;
@@ -1311,6 +1313,24 @@ public class Table extends Relation implements IntIterable {
             result.addColumn(copy);
         }
         return result;
+    }
+
+    /**
+     * 根据某一列去重，重复的行保留第一行
+     */
+    public Table dropDuplicates(String columnName){
+        Column column = column(columnName);
+        Set<String> keepedKeySet = new HashSet<>();
+        IntArrayList dropRows = new IntArrayList();
+        for (int i = 0; i < column.size(); i++) {
+            String value = column.getString(i);
+            if (keepedKeySet.contains(value)) {
+                dropRows.add(i);
+            } else {
+                keepedKeySet.add(value);
+            }
+        }
+        return this.dropRows(dropRows);
     }
 
 }
